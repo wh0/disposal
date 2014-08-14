@@ -1,5 +1,6 @@
-CXXFLAGS = -std=c++11
-LDFLAGS = -Wl,--unresolved-symbols=ignore-in-shared-libs
+CXX = arm-linux-gnueabi-g++
+CXXFLAGS = -std=c++11 -Iarmel/usr/include/arm-linux-gnueabi
+LDFLAGS = -Wl,--unresolved-symbols=ignore-in-shared-libs -Larmel/usr/lib/arm-linux-gnueabi
 LDLIBS = -lapt-pkg
 
 all: disposal

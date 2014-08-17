@@ -95,11 +95,11 @@ bool scan(CommandLine &CmdL) {
 	{
 		APT::CacheSetHelper helper;
 
-		read_file(_config->FindFile("Disposal::State::No", "no.txt").c_str(), [&](const std::string s) {
+		read_file(_config->FindFile("Disposal::State::No", "no.txt").c_str(), [&](const std::string &s) {
 			APT::PackageContainerInterface::FromString(&no, Cache, s, helper);
 		});
 
-		read_file(_config->FindFile("Disposal::State::Yes", "yes.txt").c_str(), [&](const std::string s) {
+		read_file(_config->FindFile("Disposal::State::Yes", "yes.txt").c_str(), [&](const std::string &s) {
 			APT::VersionContainerInterface::FromString(&yes, Cache, s, APT::VersionContainerInterface::CANDIDATE, helper);
 		});
 

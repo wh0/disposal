@@ -32,34 +32,47 @@ struct scan_info {
 	bool in_yes;
 };
 
-bool notable_new_install(pkgCacheFile &Cache, const std::vector<scan_info> &info, const pkgCache::PkgIterator pkg, pkgDepCache::StateCache &P) {
-	// new install as requested
-	if (info[pkg->ID].in_yes) return true;
+template<typename callback_t>
+static void fancy_reverse_deps(const pkgCache::PkgIterator pkg, const pkgCache::VerIterator ver, callback_t callback) {
 	for (pkgCache::DepIterator dep = pkg.RevDependsList(); !dep.end(); ++dep) {
-		if (dep.IsNegative()) continue;
-		if (!Cache->IsImportantDep(dep)) continue;
-		if (Cache[dep.ParentPkg()].NewInstall()) continue;
-		if (dep.ParentVer() != Cache[dep.ParentPkg()].InstallVer) continue;
-		if (!dep.IsSatisfied(P.InstVerIter(Cache))) continue;
-		// something that isn't a new install depends on it
-		return true;
+		if (dep.IsSatisfied(ver)) callback(dep);
 	}
-	return false;
+	for (pkgCache::PrvIterator prv = ver.ProvidesList(); !prv.end(); ++prv) {
+		for (pkgCache::DepIterator dep = prv.ParentPkg().RevDependsList(); !dep.end(); ++dep) {
+			if (dep.IsSatisfied(prv)) callback(dep);
+		}
+	}
+}
+
+bool notable_new_install(pkgCacheFile &Cache, const std::vector<scan_info> &info, const pkgCache::PkgIterator pkg) {
+	// new install as requested
+	pkgDepCache::StateCache &P = Cache[pkg];
+	if (info[pkg->ID].in_yes) return true;
+	bool notable = false;
+	fancy_reverse_deps(pkg, P.InstVerIter(Cache), [&](const pkgCache::DepIterator dep) {
+		if (dep.IsNegative()) return;
+		if (!Cache->IsImportantDep(dep)) return;
+		if (Cache[dep.ParentPkg()].NewInstall()) return;
+		if (dep.ParentVer() != Cache[dep.ParentPkg()].InstallVer) return;
+		// something that isn't a new install depends on it
+		notable = true;
+	});
+	return notable;
 }
 
 bool notable_remove(pkgCacheFile &Cache, const std::vector<scan_info> &info, const pkgCache::PkgIterator pkg) {
 	// removing as requested
 	if (info[pkg->ID].in_no) return true;
-	for (pkgCache::DepIterator dep = pkg.RevDependsList(); !dep.end(); ++dep) {
-		if (dep.IsNegative()) continue;
-		if (!Cache->IsImportantDep(dep)) continue;
-		if (!Cache[dep.ParentPkg()].Delete()) continue;
-		if (dep.ParentVer() != dep.ParentPkg().CurrentVer()) continue;
-		if (!dep.IsSatisfied(pkg.CurrentVer())) continue;
+	bool notable = true;
+	fancy_reverse_deps(pkg, pkg.CurrentVer(), [&](const pkgCache::DepIterator dep) {
+		if (dep.IsNegative()) return;
+		if (!Cache->IsImportantDep(dep)) return;
+		if (!Cache[dep.ParentPkg()].Delete()) return;
+		if (dep.ParentVer() != dep.ParentPkg().CurrentVer()) return;
 		// something else being removed depends on it
-		return false;
-	}
-	return true;
+		notable = false;
+	});
+	return notable;
 }
 
 bool scan(CommandLine &CmdL) {
@@ -158,7 +171,7 @@ bool scan(CommandLine &CmdL) {
 	for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {
 		pkgDepCache::StateCache &P = Cache[pkg];
 		if (P.NewInstall()) {
-			if (!notable_new_install(Cache, info, pkg, P)) std::cout << "  ";
+			if (!notable_new_install(Cache, info, pkg)) std::cout << "  ";
 			std::cout << pkg.Name() << '+' << std::endl;
 		} else if (P.Delete()) {
 			if (!notable_remove(Cache, info, pkg)) std::cout << "  ";

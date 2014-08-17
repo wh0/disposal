@@ -182,16 +182,20 @@ bool scan(CommandLine &CmdL) {
 	Cache->Update();
 
 	// compare with simulation
+	bool silence = true;
 	for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {
 		pkgDepCache::StateCache &P = Cache[pkg];
 		if (P.NewInstall()) {
 			if (!notable_new_install(Cache, info, pkg)) std::cout << "  ";
 			std::cout << pkg.Name() << '+' << std::endl;
+			silence = false;
 		} else if (P.Delete()) {
 			if (!notable_remove(Cache, info, pkg)) std::cout << "  ";
 			std::cout << pkg.Name() << '-' << std::endl;
+			silence = false;
 		}
 	}
+	if (silence) std::cerr << "no changes" << std::endl;
 
 	return true;
 }

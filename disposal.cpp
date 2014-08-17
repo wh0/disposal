@@ -125,7 +125,7 @@ bool scan(CommandLine &CmdL) {
 		}
 
 		// prevent install of "no" packages
-		for (pkgCache::PkgIterator pkg : no) {
+		for (const pkgCache::PkgIterator pkg : no) {
 			info[pkg->ID].in_no = true;
 			Fix.Protect(pkg);
 			Fix.Remove(pkg);
@@ -141,7 +141,7 @@ bool scan(CommandLine &CmdL) {
 		}
 
 		// install the "yes" packages
-		for (pkgCache::VerIterator ver : yes) {
+		for (const pkgCache::VerIterator ver : yes) {
 			const pkgCache::PkgIterator pkg = ver.ParentPkg();
 			info[pkg->ID].in_yes = true;
 			Fix.Protect(pkg);

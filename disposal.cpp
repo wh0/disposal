@@ -202,8 +202,9 @@ bool scan(CommandLine &CmdL) {
 
 CommandLine::Args Args[] = {
 	{'m', "debug-marker", "Debug::pkgDepCache::Marker", CommandLine::Boolean},
-	{'a', "debug-autoinstall", "Debug::pkgDepCache::AutoInstall", CommandLine::Boolean},
+	{'i', "debug-autoinstall", "Debug::pkgDepCache::AutoInstall", CommandLine::Boolean},
 	{'p', "debug-problemresolver", "Debug::pkgProblemResolver", CommandLine::Boolean},
+	{'r', "debug-autoremove", "Debug::pkgAutoRemove", CommandLine::Boolean},
 	{'q', "quiet", "quiet", CommandLine::IntLevel},
 	{'q', "silent", "quiet", CommandLine::IntLevel},
 	{'c', "config-file", NULL, CommandLine::ConfigFile},

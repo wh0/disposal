@@ -149,13 +149,27 @@ bool scan(CommandLine &CmdL) {
 			Cache->MarkInstall(pkg);
 		}
 
-		// *shrug* in case anything goes wrong, I guess
+		// problems happen all the time
 		Fix.Resolve();
 	}
 
 	if (Cache->BrokenCount() != 0) {
 		std::cerr << Cache->BrokenCount() << " broken" << std::endl;
 	}
+
+	// the problem resolver might decide not to install a package we recursively marked for installation
+	// it doesn't recursively unmark that package's dependencies
+	{
+		pkgDepCache::ActionGroup group(Cache);
+
+		for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {
+			if (Cache[pkg].Garbage) {
+				Cache->MarkDelete(pkg, false, 0, false);
+			}
+		}
+	}
+
+	// DoAutoRemove in private-install.cc does stuff when BrokenCount or PolicyBrokenCount are nonzero
 
 	// restore current state
 	for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {

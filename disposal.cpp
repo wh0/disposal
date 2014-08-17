@@ -113,9 +113,11 @@ bool scan(CommandLine &CmdL) {
 	}
 
 	if (!Cache.BuildDepCache(&Prog)) return false;
+
 	{
 		pkgDepCache::ActionGroup group(Cache);
 		pkgProblemResolver Fix(Cache);
+		APT::PackageSet autoInstall;
 
 		// fill in the original candidate versions
 		for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {
@@ -132,21 +134,28 @@ bool scan(CommandLine &CmdL) {
 			Cache->MarkProtected(pkg);
 		}
 
-		// install required packages
+		// shallow-install required packages
 		for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {
 			if (pkg->Flags & (pkgCache::Flag::Essential | pkgCache::Flag::Important)) {
 				Fix.Protect(pkg);
-				Cache->MarkInstall(pkg);
+				Cache->MarkInstall(pkg, false);
+				autoInstall.insert(pkg);
 			}
 		}
 
-		// install the "yes" packages
+		// shallow-install the "yes" packages
 		for (const pkgCache::VerIterator ver : yes) {
 			const pkgCache::PkgIterator pkg = ver.ParentPkg();
 			info[pkg->ID].in_yes = true;
 			Fix.Protect(pkg);
 			Cache->SetCandidateVersion(ver);
-			Cache->MarkInstall(pkg);
+			Cache->MarkInstall(pkg, false);
+			autoInstall.insert(pkg);
+		}
+
+		// install everyone's dependencies
+		for (const pkgCache::PkgIterator pkg : autoInstall) {
+			if (Cache[pkg].InstBroken() || Cache[pkg].InstPolicyBroken()) Cache->MarkInstall(pkg);
 		}
 
 		// problems happen all the time

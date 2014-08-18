@@ -32,34 +32,47 @@ struct scan_info {
 	bool in_yes;
 };
 
-bool notable_new_install(pkgCacheFile &Cache, const std::vector<scan_info> &info, const pkgCache::PkgIterator pkg, pkgDepCache::StateCache &P) {
-	// new install as requested
-	if (info[pkg->ID].in_yes) return true;
+template<typename callback_t>
+static void fancy_reverse_deps(const pkgCache::PkgIterator pkg, const pkgCache::VerIterator ver, callback_t callback) {
 	for (pkgCache::DepIterator dep = pkg.RevDependsList(); !dep.end(); ++dep) {
-		if (dep.IsNegative()) continue;
-		if (!Cache->IsImportantDep(dep)) continue;
-		if (Cache[dep.ParentPkg()].NewInstall()) continue;
-		if (dep.ParentVer() != Cache[dep.ParentPkg()].InstallVer) continue;
-		if (!dep.IsSatisfied(P.InstVerIter(Cache))) continue;
-		// something that isn't a new install depends on it
-		return true;
+		if (dep.IsSatisfied(ver)) callback(dep);
 	}
-	return false;
+	for (pkgCache::PrvIterator prv = ver.ProvidesList(); !prv.end(); ++prv) {
+		for (pkgCache::DepIterator dep = prv.ParentPkg().RevDependsList(); !dep.end(); ++dep) {
+			if (dep.IsSatisfied(prv)) callback(dep);
+		}
+	}
+}
+
+bool notable_new_install(pkgCacheFile &Cache, const std::vector<scan_info> &info, const pkgCache::PkgIterator pkg) {
+	// new install as requested
+	pkgDepCache::StateCache &P = Cache[pkg];
+	if (info[pkg->ID].in_yes) return true;
+	bool notable = false;
+	fancy_reverse_deps(pkg, P.InstVerIter(Cache), [&](const pkgCache::DepIterator dep) {
+		if (dep.IsNegative()) return;
+		if (!Cache->IsImportantDep(dep)) return;
+		if (Cache[dep.ParentPkg()].NewInstall()) return;
+		if (dep.ParentVer() != Cache[dep.ParentPkg()].InstallVer) return;
+		// something that isn't a new install depends on it
+		notable = true;
+	});
+	return notable;
 }
 
 bool notable_remove(pkgCacheFile &Cache, const std::vector<scan_info> &info, const pkgCache::PkgIterator pkg) {
 	// removing as requested
 	if (info[pkg->ID].in_no) return true;
-	for (pkgCache::DepIterator dep = pkg.RevDependsList(); !dep.end(); ++dep) {
-		if (dep.IsNegative()) continue;
-		if (!Cache->IsImportantDep(dep)) continue;
-		if (!Cache[dep.ParentPkg()].Delete()) continue;
-		if (dep.ParentVer() != dep.ParentPkg().CurrentVer()) continue;
-		if (!dep.IsSatisfied(pkg.CurrentVer())) continue;
+	bool notable = true;
+	fancy_reverse_deps(pkg, pkg.CurrentVer(), [&](const pkgCache::DepIterator dep) {
+		if (dep.IsNegative()) return;
+		if (!Cache->IsImportantDep(dep)) return;
+		if (!Cache[dep.ParentPkg()].Delete()) return;
+		if (dep.ParentVer() != dep.ParentPkg().CurrentVer()) return;
 		// something else being removed depends on it
-		return false;
-	}
-	return true;
+		notable = false;
+	});
+	return notable;
 }
 
 bool scan(CommandLine &CmdL) {
@@ -82,11 +95,11 @@ bool scan(CommandLine &CmdL) {
 	{
 		APT::CacheSetHelper helper;
 
-		read_file(_config->FindFile("Disposal::State::No", "no.txt").c_str(), [&](const std::string s) {
+		read_file(_config->FindFile("Disposal::State::No", "no.txt").c_str(), [&](const std::string &s) {
 			APT::PackageContainerInterface::FromString(&no, Cache, s, helper);
 		});
 
-		read_file(_config->FindFile("Disposal::State::Yes", "yes.txt").c_str(), [&](const std::string s) {
+		read_file(_config->FindFile("Disposal::State::Yes", "yes.txt").c_str(), [&](const std::string &s) {
 			APT::VersionContainerInterface::FromString(&yes, Cache, s, APT::VersionContainerInterface::CANDIDATE, helper);
 		});
 
@@ -100,9 +113,11 @@ bool scan(CommandLine &CmdL) {
 	}
 
 	if (!Cache.BuildDepCache(&Prog)) return false;
+
 	{
 		pkgDepCache::ActionGroup group(Cache);
 		pkgProblemResolver Fix(Cache);
+		APT::PackageSet autoInstall;
 
 		// fill in the original candidate versions
 		for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {
@@ -112,37 +127,58 @@ bool scan(CommandLine &CmdL) {
 		}
 
 		// prevent install of "no" packages
-		for (pkgCache::PkgIterator pkg : no) {
+		for (const pkgCache::PkgIterator pkg : no) {
 			info[pkg->ID].in_no = true;
 			Fix.Protect(pkg);
 			Fix.Remove(pkg);
 			Cache->MarkProtected(pkg);
 		}
 
-		// install required packages
+		// shallow-install required packages
 		for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {
 			if (pkg->Flags & (pkgCache::Flag::Essential | pkgCache::Flag::Important)) {
 				Fix.Protect(pkg);
-				Cache->MarkInstall(pkg);
+				Cache->MarkInstall(pkg, false);
+				autoInstall.insert(pkg);
 			}
 		}
 
-		// install the "yes" packages
-		for (pkgCache::VerIterator ver : yes) {
+		// shallow-install the "yes" packages
+		for (const pkgCache::VerIterator ver : yes) {
 			const pkgCache::PkgIterator pkg = ver.ParentPkg();
 			info[pkg->ID].in_yes = true;
 			Fix.Protect(pkg);
 			Cache->SetCandidateVersion(ver);
-			Cache->MarkInstall(pkg);
+			Cache->MarkInstall(pkg, false);
+			autoInstall.insert(pkg);
 		}
 
-		// *shrug* in case anything goes wrong, I guess
+		// install everyone's dependencies
+		for (const pkgCache::PkgIterator pkg : autoInstall) {
+			if (Cache[pkg].InstBroken() || Cache[pkg].InstPolicyBroken()) Cache->MarkInstall(pkg);
+		}
+
+		// problems happen all the time
 		Fix.Resolve();
 	}
 
 	if (Cache->BrokenCount() != 0) {
 		std::cerr << Cache->BrokenCount() << " broken" << std::endl;
 	}
+
+	// the problem resolver might decide not to install a package we recursively marked for installation
+	// it doesn't recursively unmark that package's dependencies
+	{
+		pkgDepCache::ActionGroup group(Cache);
+
+		for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {
+			if (Cache[pkg].Garbage) {
+				Cache->MarkDelete(pkg, false, 0, false);
+			}
+		}
+	}
+
+	// DoAutoRemove in private-install.cc does stuff when BrokenCount or PolicyBrokenCount are nonzero
 
 	// restore current state
 	for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {
@@ -155,24 +191,29 @@ bool scan(CommandLine &CmdL) {
 	Cache->Update();
 
 	// compare with simulation
+	bool silence = true;
 	for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {
 		pkgDepCache::StateCache &P = Cache[pkg];
 		if (P.NewInstall()) {
-			if (!notable_new_install(Cache, info, pkg, P)) std::cout << "  ";
+			if (!notable_new_install(Cache, info, pkg)) std::cout << "  ";
 			std::cout << pkg.Name() << '+' << std::endl;
+			silence = false;
 		} else if (P.Delete()) {
 			if (!notable_remove(Cache, info, pkg)) std::cout << "  ";
 			std::cout << pkg.Name() << '-' << std::endl;
+			silence = false;
 		}
 	}
+	if (silence) std::cerr << "no changes" << std::endl;
 
 	return true;
 }
 
 CommandLine::Args Args[] = {
 	{'m', "debug-marker", "Debug::pkgDepCache::Marker", CommandLine::Boolean},
-	{'a', "debug-autoinstall", "Debug::pkgDepCache::AutoInstall", CommandLine::Boolean},
+	{'i', "debug-autoinstall", "Debug::pkgDepCache::AutoInstall", CommandLine::Boolean},
 	{'p', "debug-problemresolver", "Debug::pkgProblemResolver", CommandLine::Boolean},
+	{'r', "debug-autoremove", "Debug::pkgAutoRemove", CommandLine::Boolean},
 	{'q', "quiet", "quiet", CommandLine::IntLevel},
 	{'q', "silent", "quiet", CommandLine::IntLevel},
 	{'c', "config-file", NULL, CommandLine::ConfigFile},

@@ -5,4 +5,11 @@ LDLIBS = -lapt-pkg
 
 all: disposal
 
-.PHONY: all
+upload: disposal
+	mkdir -p $@
+	cp $? $@
+	git add $@
+	git push -f origin `git write-tree --prefix=$@`:tags/arm-test
+	git rm -r --cached $@
+
+.PHONY: all upload

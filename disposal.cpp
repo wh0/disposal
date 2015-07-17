@@ -24,6 +24,13 @@ static void read_file(const char * const filename, callback_t callback) {
 	}
 }
 
+static bool in_base(pkgCacheFile &Cache, const pkgCache::PkgIterator pkg, const bool yes_standard) {
+	if (pkg->Flags & (pkgCache::Flag::Essential || pkgCache::Flag::Important)) return true;
+	if (!yes_standard) return false;
+	const pkgCache::VerIterator ver = Cache.GetPolicy()->GetCandidateVer(pkg);
+	return ver->Priority <= pkgCache::State::Standard;
+}
+
 // whatever per-package info we need
 struct scan_info {
 	pkgCache::Version *orig_cur;
@@ -92,6 +99,7 @@ bool scan(CommandLine &CmdL) {
 	// read in our state
 	APT::PackageList no;
 	APT::VersionList yes;
+	bool yes_standard = false;
 	{
 		APT::CacheSetHelper helper;
 
@@ -100,6 +108,11 @@ bool scan(CommandLine &CmdL) {
 		});
 
 		read_file(_config->FindFile("Disposal::State::Yes", "yes.txt").c_str(), [&](const std::string &s) {
+			// hhhh debian's "standard" task is done by priority
+			if (s == "standard^") {
+				yes_standard = true;
+				return;
+			}
 			APT::VersionContainerInterface::FromString(&yes, Cache, s, APT::VersionContainerInterface::CANDIDATE, helper);
 		});
 
@@ -126,21 +139,21 @@ bool scan(CommandLine &CmdL) {
 			}
 		}
 
+		// shallow-install base packages
+		for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {
+			if (in_base(Cache, pkg, yes_standard)) {
+				Fix.Protect(pkg);
+				Cache->MarkInstall(pkg, false);
+				autoInstall.insert(pkg);
+			}
+		}
+
 		// prevent install of "no" packages
 		for (const pkgCache::PkgIterator pkg : no) {
 			info[pkg->ID].in_no = true;
 			Fix.Protect(pkg);
 			Fix.Remove(pkg);
 			Cache->MarkProtected(pkg);
-		}
-
-		// shallow-install required packages
-		for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {
-			if (pkg->Flags & (pkgCache::Flag::Essential | pkgCache::Flag::Important)) {
-				Fix.Protect(pkg);
-				Cache->MarkInstall(pkg, false);
-				autoInstall.insert(pkg);
-			}
 		}
 
 		// shallow-install the "yes" packages

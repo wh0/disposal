@@ -1,0 +1,5 @@
+#!/bin/bash
+echo 'yes	manual'
+comm -3 \
+	<(grep -v '^#\|^$' yes.txt | sort) \
+	<(apt-mark showmanual | sort)

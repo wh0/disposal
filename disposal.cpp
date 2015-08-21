@@ -25,7 +25,7 @@ static void read_file(const char * const filename, callback_t callback) {
 }
 
 static bool in_base(pkgCacheFile &Cache, const pkgCache::PkgIterator pkg, const bool yes_standard) {
-	if (pkg->Flags & (pkgCache::Flag::Essential || pkgCache::Flag::Important)) return true;
+	if (pkg->Flags & (pkgCache::Flag::Essential | pkgCache::Flag::Important)) return true;
 	if (!yes_standard) return false;
 	const pkgCache::VerIterator ver = Cache.GetPolicy()->GetCandidateVer(pkg);
 	return ver->Priority <= pkgCache::State::Standard;

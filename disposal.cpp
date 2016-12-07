@@ -24,11 +24,9 @@ static void read_file(const char * const filename, callback_t callback) {
 	}
 }
 
-static bool in_base(pkgCacheFile &Cache, const pkgCache::PkgIterator pkg, const bool yes_standard) {
-	if (pkg->Flags & (pkgCache::Flag::Essential | pkgCache::Flag::Important)) return true;
-	if (!yes_standard) return false;
+static bool in_base(pkgCacheFile &Cache, const pkgCache::PkgIterator pkg, const pkgCache::State::VerPriority reference_priority) {
 	const pkgCache::VerIterator ver = Cache.GetPolicy()->GetCandidateVer(pkg);
-	return ver->Priority <= pkgCache::State::Standard;
+	return ver.IsGood() && ver->Priority <= reference_priority;
 }
 
 // whatever per-package info we need
@@ -99,7 +97,7 @@ bool scan(CommandLine &CmdL) {
 	// read in our state
 	APT::PackageList no;
 	APT::VersionList yes;
-	bool yes_standard = false;
+	pkgCache::State::VerPriority reference_priority = pkgCache::State::Required;
 	{
 		APT::CacheSetHelper helper;
 
@@ -109,8 +107,14 @@ bool scan(CommandLine &CmdL) {
 
 		read_file(_config->FindFile("Disposal::State::Yes", "yes.txt").c_str(), [&](const std::string &s) {
 			// hhhh debian's "standard" task is done by priority
-			if (s == "standard^") {
-				yes_standard = true;
+			if (s == "Priority: required") {
+				reference_priority = pkgCache::State::Required;
+				return;
+			} else if (s == "Priority: important") {
+				reference_priority = pkgCache::State::Important;
+				return;
+			} else if (s == "Priority: standard") {
+				reference_priority = pkgCache::State::Standard;
 				return;
 			}
 			APT::VersionContainerInterface::FromString(&yes, Cache, s, APT::CacheSetHelper::CANDIDATE, helper);
@@ -141,7 +145,7 @@ bool scan(CommandLine &CmdL) {
 
 		// shallow-install base packages
 		for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {
-			if (in_base(Cache, pkg, yes_standard)) {
+			if (in_base(Cache, pkg, reference_priority)) {
 				Fix.Protect(pkg);
 				Cache->MarkInstall(pkg, false);
 				autoInstall.insert(pkg);

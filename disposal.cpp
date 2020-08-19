@@ -235,7 +235,7 @@ CommandLine::Args Args[] = {
 	{'q', "silent", "quiet", CommandLine::IntLevel},
 	{'c', "config-file", NULL, CommandLine::ConfigFile},
 	{'\0', "install-recommends", "APT::Install-Recommends", CommandLine::Boolean},
-	{'\0', "install-Suggests", "APT::Install-Suggests", CommandLine::Boolean},
+	{'\0', "install-suggests", "APT::Install-Suggests", CommandLine::Boolean},
 	{'o', "option", NULL, CommandLine::ArbItem},
 	{'\0', NULL, NULL, 0}
 };

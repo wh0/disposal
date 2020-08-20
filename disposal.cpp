@@ -5,6 +5,8 @@
 #include <apt-pkg/configuration.h>
 #include <apt-pkg/init.h>
 #include <apt-pkg/pkgcache.h>
+#include <apt-pkg/pkgsystem.h>
+#include <apt-pkg/policy.h>
 #include <apt-pkg/progress.h>
 
 #include <fstream>
@@ -31,8 +33,8 @@ static bool in_base(pkgCacheFile &Cache, const pkgCache::PkgIterator pkg, const 
 
 // whatever per-package info we need
 struct scan_info {
-	pkgCache::Version *orig_cur;
-	pkgCache::Version *orig_cand;
+	pkgCache::VerIterator orig_cur;
+	pkgCache::VerIterator orig_cand;
 	bool in_no;
 	bool in_yes;
 };
@@ -199,7 +201,7 @@ bool scan(CommandLine &CmdL) {
 
 	// restore current state
 	for (pkgCache::PkgIterator pkg = Cache.GetPkgCache()->PkgBegin(); !pkg.end(); ++pkg) {
-		pkg->CurrentVer = info[pkg->ID].orig_cur == NULL ? 0 : info[pkg->ID].orig_cur - Cache.GetPkgCache()->VerP;
+		pkg->CurrentVer = info[pkg->ID].orig_cur.MapPointer();
 		pkgDepCache::StateCache &P = Cache[pkg];
 		if (P.InstallVer == pkg.CurrentVer()) P.Mode = pkgDepCache::ModeKeep;
 		else if (P.InstallVer == NULL && pkg.CurrentVer().IsGood()) P.Mode = pkgDepCache::ModeDelete;
